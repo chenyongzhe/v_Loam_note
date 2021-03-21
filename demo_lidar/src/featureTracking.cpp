@@ -56,8 +56,9 @@ CvPoint2D32f *featuresCur = new CvPoint2D32f[2 * MAXFEATURENUM];
 CvPoint2D32f *featuresLast = new CvPoint2D32f[2 * MAXFEATURENUM];
 char featuresFound[2 * MAXFEATURENUM];
 float featuresError[2 * MAXFEATURENUM];
-
+//特征点从开始位置的索引，用于辅助后面对特征点计数辅助生成featuresInd
 int featuresIndFromStart = 0;
+//特征点索引
 int featuresInd[2 * MAXFEATURENUM] = {0};
 //总共的特征点数量
 int totalFeatureNum = 0;
@@ -184,10 +185,12 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
                               &numToFind, 0.1, 5.0, NULL, 3, 1, 0.04);
 
         int numFound = 0;
+
         for(int k = 0; k < numToFind; k++) {
+          //第k个特征点的x y加上subregionLef和subregionTop,，因为进行了ROI处理为了还原角点在源图像的坐标
           featuresLast[totalFeatureNum + k].x += subregionLeft;
           featuresLast[totalFeatureNum + k].y += subregionTop;
-
+          //cvCornerHarris是对imageshow处理，将坐标缩小一半，加0.5 为了向上取整
           int xInd = (featuresLast[totalFeatureNum + k].x + 0.5) / showDSRate;
           int yInd = (featuresLast[totalFeatureNum + k].y + 0.5) / showDSRate;
 
@@ -198,10 +201,12 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
           //当提取的特征点对应的harris的值大于一定的值，则说明该特征点是比较可靠的角点。
 		  //harris的生成的角点灰度值较小，因此阈值设的很小，e-7
           if (((float*)(harrisLast->imageData + harrisLast->widthStep * yInd))[xInd] > 1e-7) {
+            //numFound默认为0,将第numFound个角点xy设置成第k个的x,y
             featuresLast[totalFeatureNum + numFound].x = featuresLast[totalFeatureNum + k].x;
             featuresLast[totalFeatureNum + numFound].y = featuresLast[totalFeatureNum + k].y;
+            //featuresIndFromStart默认为0
             featuresInd[totalFeatureNum + numFound] = featuresIndFromStart;
-
+            //有效角点个数加一
             numFound++;
             featuresIndFromStart++;
           }
@@ -215,17 +220,40 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
   }
 
   //使用光流法来追踪curr帧中与last帧中提取的角点相匹配的角点
+  /*
+  void cvCalcOpticalFlowPyrLK( const CvArr* prev, const CvArr* curr, CvArr* prev_pyr, CvArr* curr_pyr,
+                             const CvPoint2D32f* prev_features, CvPoint2D32f* curr_features,
+                             int count, CvSize win_size, int level, char* status,
+                             float* track_error, CvTermCriteria criteria, int flags );
+  prev 在时间 t 的第一帧
+  curr 在时间 t + dt 的第二帧
+  prev_pyr 第一帧的金字塔缓存. 如果指针非 NULL , 则缓存必须有足够的空间来存储金字塔从层 1 到层 #level 的内容。
+           尺寸 (image_width+8)*image_height/3 比特足够了
+  curr_pyr 与 prev_pyr 类似， 用于第二帧
+  prev_features 需要发现光流的点集
+  curr_features 包含新计算出来的位置的 点集
+  count         特征点的数目
+  win_size 每个金字塔层的搜索窗口尺寸
+  level  最大的金字塔层数。如果为 0 , 不使用金字塔 (即金字塔为单层), 如果为 1 , 使用两层，下面依次类推。
+  status 数组。如果对应特征的光流被发现，数组中的每一个元素都被设置为 1， 否则设置为 0。
+  error  双精度数组，包含原始图像碎片与移动点之间的差。为可选参数，可以是 NULL .
+  criteria 准则，指定在每个金字塔层，为某点寻找光流的迭代过程的终止条件。
+  flags  其它选项：
+       CV_LKFLOW_PYR_A_READY , 在调用之前，第一帧的金字塔已经准备好
+       CV_LKFLOW_PYR_B_READY , 在调用之前，第二帧的金字塔已经准备好
+       CV_LKFLOW_INITIAL_GUESSES , 在调用之前，数组 B 包含特征的初始坐标 （Hunnish: 在本节中没有出现数组 B，不知是指的哪一个）
+  */
   cvCalcOpticalFlowPyrLK(imageLast, imageCur, pyrLast, pyrCur,
                          featuresLast, featuresCur, totalFeatureNum, cvSize(winSize, winSize), 
                          3, featuresFound, featuresError, 
                          cvTermCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 30, 0.01), 0);
 
   cout << "totalFeatureNum after LK:111111111:\t" << totalFeatureNum << endl;
-
+ //将每个subregion的特征数量标记置为0
   for (int i = 0; i < totalSubregionNum; i++) {
     subregionFeatureNum[i] = 0;
   }
-
+  
   ImagePoint point;
   int featureCount = 0;
   double meanShiftX = 0, meanShiftY = 0;
@@ -235,7 +263,7 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
                     * (featuresLast[i].x - featuresCur[i].x)
                     + (featuresLast[i].y - featuresCur[i].y) 
                     * (featuresLast[i].y - featuresCur[i].y));
-
+    //判断特征点是否距离大于阈值是否越出边界
     if (!(trackDis > maxTrackDis || featuresCur[i].x < xBoundary || 
       featuresCur[i].x > imageWidth - xBoundary || featuresCur[i].y < yBoundary || 
       featuresCur[i].y > imageHeight - yBoundary)) {
@@ -276,6 +304,7 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
         meanShiftY += fabs((featuresCur[featureCount].y - featuresLast[featureCount].y) / kImage[4]);
 
         featureCount++;
+        //统计每个subregion的特征点数量，保证每个subregion的特征点不多于两个
         subregionFeatureNum[ind]++;
       }
     }
@@ -297,8 +326,9 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
   imagePointsLast2.header.stamp = ros::Time().fromSec(timeLast);
   //imagePointsLast2.header.frame_id = "/camera_init";
   //imagePointsLast2.header.frame_id = "/camera";
+  //发布特帧点
   imagePointsLastPubPointer->publish(imagePointsLast2);
-
+  //发布要显示的图像，两帧发布一次
   showCount = (showCount + 1) % (showSkipNum + 1);
   if (showCount == showSkipNum) {
     //Mat imageShowMat(imageShow);
