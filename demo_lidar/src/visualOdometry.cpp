@@ -969,6 +969,7 @@ void depthCloudHandler(const sensor_msgs::PointCloud2ConstPtr& depthCloud2)
 
   if (depthCloudNum > 10) {
     for (int i = 0; i < depthCloudNum; i++) {
+    // 深度图的接收在于将传来的点云归一化到距离光心10米的平面上，之所以是z值为10是loam一向的做法，以相机坐标系为基准。
 		//intensity 存放点云的原始深度信息,xyz存放深度为化为10的坐标
 		//同样将点云归一化后放大10倍,与视觉特征点的存放相一致，即将激光采集到的点统一放在深度为10的归一化平面上
       depthCloud->points[i].intensity = depthCloud->points[i].z;

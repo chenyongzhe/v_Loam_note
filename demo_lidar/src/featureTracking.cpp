@@ -292,6 +292,7 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
 
         //防止重复添加
         if (i >= recordFeatureNum) {
+    //u=x/z，v=y/z，得到的是像素的归一化后的相机坐标系下的三维坐标
 		//对图像点进行归一化，即将图像点都归一化到深度为1的平面上
 		//在visual odom 计算时，会将雷达深度点云及图像点云放在深度为10的平面上。
           point.u = -(featuresLast[featureCount].x - kImage[2]) / kImage[0];
