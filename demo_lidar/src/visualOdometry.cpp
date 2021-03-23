@@ -89,7 +89,8 @@ const int showDSRate = 2;
 //lx,ly,lz是帧与帧之间相机的欧拉角旋转角度
 //cx,cy,cz是上一帧计算的相机在世界坐标系下的欧拉旋转角
 //ox,oy,oz是当前计算的相机在世界坐标系下的欧拉旋转角输出
-//由于在解算时，并非求的上一帧到下帧之间的旋转矩阵R{(i-1)to i}，我们由论文公式(3-6)求出的transform[0-5]是将上一帧坐标系下的点映射到下一帧坐标系下的变换矩阵对应的偏移和旋转欧拉角，设transform对应的旋转阵为R:{rpy}，因此，下一帧坐标系基于上一帧坐标系旋转矩阵R{(i-1)to i}=R^{-1}={-y,-p,-r}。同理变换矩阵T也是
+//由于在解算时，并非求的上一帧到下帧之间的旋转矩阵R{(i-1)to i}，我们由论文公式(3-6)求出的transform[0-5]是将上一帧坐标系下的点映射到下一帧坐标系下的变换矩阵对应的偏移和旋转欧拉角，
+//设transform对应的旋转阵为R:{rpy}，因此，下一帧坐标系基于上一帧坐标系旋转矩阵R{(i-1)to i}=R^{-1}={-y,-p,-r}。同理变换矩阵T也是
 //因此相机的累计旋转矩阵为Ro=R^{-1}*Rc
 //其中：Rc=[ccy 0 scy;0 1 0;-scy 0 ccy]*[1 0 0;0 ccx -scx;0 scx ccx]*[ccz -scz 0;scz ccz 0;0 0 1]
 
@@ -168,7 +169,7 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
       imuPitchCur = imuPitch[imuPointerFront];
       imuYawCur = imuYaw[imuPointerFront];
     } else {
-		//找到比image新的imu消息，则线性差值得到发布的image时的imu估计值
+		//找到比image新的imu消息，则线性插值得到发布的image时的imu估计值
 		//线性插值，得到对应时间的imu数据
       int imuPointerBack = (imuPointerFront + imuQueLength - 1) % imuQueLength;
       double ratioFront = (imagePointsCurTime - imuTime[imuPointerBack]) 
@@ -178,7 +179,8 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
 
       imuRollCur = imuRoll[imuPointerFront] * ratioFront + imuRoll[imuPointerBack] * ratioBack;
       imuPitchCur = imuPitch[imuPointerFront] * ratioFront + imuPitch[imuPointerBack] * ratioBack;
-	  //从四元数解析到欧拉角的范围为[-PI, PI],因此会出现-PI与PI之间的跳变.roll和pitch幅度较小，不会出现跳变，但是yaw由于累积会超越PI，-PI边界值。以下代码是解决yaw的跳变问题。
+	  //从四元数解析到欧拉角的范围为[-PI, PI],因此会出现-PI与PI之间的跳变.roll和pitch幅度较小，不会出现跳变，但是yaw由于累积会超越PI，-PI边界值。
+      //以下代码是解决yaw的跳变问题。
       if (imuYaw[imuPointerFront] - imuYaw[imuPointerBack] > PI) {
         imuYawCur = imuYaw[imuPointerFront] * ratioFront + (imuYaw[imuPointerBack] + 2 * PI) * ratioBack;
       } else if (imuYaw[imuPointerFront] - imuYaw[imuPointerBack] < -PI) {
@@ -217,7 +219,7 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
   pcl::PointCloud<pcl::PointXYZHSV>::Ptr startTransTemp = startTransLast;
   startTransLast = startTransCur;
   startTransCur = startTransTemp;
-
+  //ipDepthLast存放三角测量的深度值
   std::vector<float>* ipDepthTemp = ipDepthLast;
   ipDepthLast = ipDepthCur;
   ipDepthCur = ipDepthTemp;
@@ -303,7 +305,7 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
           double z3 = depthPoint.intensity;
           minDepth = (z3 < minDepth)? z3 : minDepth;
           maxDepth = (z3 > maxDepth)? z3 : maxDepth;
-
+          //imagePointsLast->points[i]的u v
           double u = ipr.x;
           double v = ipr.y;
 			//由论文公式(10)求解获得ipr.s 利用(Xs-X1)((X1-X2)x(X1-X3))=0求解z,Xs=z[u,v,1]T
@@ -338,7 +340,8 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
 
 	//如果没有获取到深度,且当特征点在相机运动一定距离后，仍被匹配到，则利用三角化计算出该点深度
 	//利用第一次发现该特征点时刻相机的运动位姿及归一化图像坐标，和当前时刻该点的运动位姿及归一化图像坐标计算该点深度
-	//首先利用第一次发现该特征点时刻相机的运动位姿及归一化图像坐标将点云转化到世界坐标系下，再利用当前时刻该点的运动位姿及归一化图像坐标将该点映射在当前相机坐标系下
+	//首先利用第一次发现该特征点时刻相机的运动位姿及归一化图像坐标将点云转化到世界坐标系下，
+  //再利用当前时刻该点的运动位姿及归一化图像坐标将该点映射在当前相机坐标系下
 	//这里坐标系的切换只进行了旋转变换，到最后才进行偏移量的计算
       if (fabs(ipr.v) < 0.5) {
 		//transformSum 是当前帧相机的累积运动估计
@@ -998,7 +1001,7 @@ void imuDataHandler(const sensor_msgs::Imu::ConstPtr& imuData)
   imuPitch[imuPointerLast] = pitch;
   imuYaw[imuPointerLast] = yaw;
 }
-
+//imageDataHandler将相关联的特征点用红绿蓝颜色圆圈发布出来
 void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData) 
 {
   cv_bridge::CvImagePtr bridge = cv_bridge::toCvCopy(imageData, "bgr8");
@@ -1009,6 +1012,7 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
   for (int i = 0; i < ipRelationsNum; i++) {
     if (fabs(ipRelations->points[i].v) < 0.5) {
 	  //没有深度点，显示红色
+    // x,y对应上一帧图像点归一化坐标；z,h对应匹配上一帧xy的当前帧的图像点归一化坐标
       cv::circle(bridge->image, cv::Point((kImage[2] - ipRelations->points[i].z * kImage[0]) / showDSRate,
                 (kImage[5] - ipRelations->points[i].h * kImage[4]) / showDSRate), 1, CV_RGB(255, 0, 0), 2);
     } else if (fabs(ipRelations->points[i].v - 1) < 0.5) {
@@ -1016,7 +1020,7 @@ void imageDataHandler(const sensor_msgs::Image::ConstPtr& imageData)
       cv::circle(bridge->image, cv::Point((kImage[2] - ipRelations->points[i].z * kImage[0]) / showDSRate,
                 (kImage[5] - ipRelations->points[i].h * kImage[4]) / showDSRate), 1, CV_RGB(0, 255, 0), 2);
     } else if (fabs(ipRelations->points[i].v - 2) < 0.5) {
-	  //通过相机运动获得深度的图像点，显示绿色
+	  //通过相机运动获得深度的图像点，显示蓝色
       cv::circle(bridge->image, cv::Point((kImage[2] - ipRelations->points[i].z * kImage[0]) / showDSRate,
                 (kImage[5] - ipRelations->points[i].h * kImage[4]) / showDSRate), 1, CV_RGB(0, 0, 255), 2);
     } /*else {
