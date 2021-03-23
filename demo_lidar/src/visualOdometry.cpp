@@ -24,6 +24,7 @@ pcl::PointCloud<ImagePoint>::Ptr startPointsCur(new pcl::PointCloud<ImagePoint>(
 pcl::PointCloud<ImagePoint>::Ptr startPointsLast(new pcl::PointCloud<ImagePoint>());
 pcl::PointCloud<pcl::PointXYZHSV>::Ptr startTransCur(new pcl::PointCloud<pcl::PointXYZHSV>());
 pcl::PointCloud<pcl::PointXYZHSV>::Ptr startTransLast(new pcl::PointCloud<pcl::PointXYZHSV>());
+//ipRelations存放两帧匹配点的归一化坐标
 pcl::PointCloud<pcl::PointXYZHSV>::Ptr ipRelations(new pcl::PointCloud<pcl::PointXYZHSV>());
 pcl::PointCloud<pcl::PointXYZHSV>::Ptr ipRelations2(new pcl::PointCloud<pcl::PointXYZHSV>());
 pcl::PointCloud<pcl::PointXYZ>::Ptr imagePointsProj(new pcl::PointCloud<pcl::PointXYZ>());
@@ -229,8 +230,9 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
   pcl::PointXYZHSV ipr;
   ipRelations->clear();
   ipInd.clear();
+  //循环的数量是上一帧的点云数量，也就是说它是基于上一帧的特征点对本帧的搜索
   for (int i = 0; i < imagePointsLastNum; i++) {
-    bool ipFound = false;
+    bool ipFound = false;//如果本帧中的共视关系不存在，则忽略不计算在内
     for (; j < imagePointsCurNum; j++) {
 	  //查找是否有匹配的特征点
       if (imagePointsCur->points[j].ind == imagePointsLast->points[i].ind) {
@@ -318,6 +320,7 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
           ipr.v = 1;
 
 			//如果最临近三个点的的深度差值超过2m，说明这3个邻近点找的点不可靠,ipr.v恢复为0
+      ////当三点深度差距过大则说明投影附近存在遮挡关系或物体边缘，放弃
           if (maxDepth - minDepth > 2) {
             ipr.s = 0;
             ipr.v = 0;
@@ -364,24 +367,25 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
           double v1 = ipr.y;
 		//加-号是将相机运动估计转成变换矩阵
 		//如，相机的位姿表示为T，将点云从世界坐标系下转换到当前相机坐标系下的变换矩阵则为T^{-1}
+          //本帧相对原点的旋转
           double srx0 = sin(-startTransLast->points[i].x);
           double crx0 = cos(-startTransLast->points[i].x);
           double sry0 = sin(-startTransLast->points[i].y);
           double cry0 = cos(-startTransLast->points[i].y);
           double srz0 = sin(-startTransLast->points[i].z);
           double crz0 = cos(-startTransLast->points[i].z);
-
+          //上一帧相对原点的旋转
           double srx1 = sin(-transformSum[0]);
           double crx1 = cos(-transformSum[0]);
           double sry1 = sin(-transformSum[1]);
           double cry1 = cos(-transformSum[1]);
           double srz1 = sin(-transformSum[2]);
           double crz1 = cos(-transformSum[2]);
-
+          //本帧相对原点的位移
           double tx0 = -startTransLast->points[i].h;
           double ty0 = -startTransLast->points[i].s;
           double tz0 = -startTransLast->points[i].v;
-
+           //上一帧相对原点的位移
           double tx1 = -transformSum[3];
           double ty1 = -transformSum[4];
           double tz1 = -transformSum[5];
@@ -450,7 +454,8 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
           }
         }
 
-//ipDepthLast是从ipDepthCur得来的，ipDepthCur是通过上一帧计算得到的运动及匹配点对得到的。就是上上一帧的点有深度，通过得到的上上帧与上帧之间的运动，从而得知与上上帧对应的上帧的点云深度。
+//ipDepthLast是从ipDepthCur得来的，ipDepthCur是通过上一帧计算得到的运动及匹配点对得到的。就是上上一帧的点有深度，
+        //通过得到的上上帧与上帧之间的运动，从而得知与上上帧对应的上帧的点云深度。
         if (ipr.v == 2) {
           if ((*ipDepthLast)[i] > 0) {
             ipr.s = 3 * ipr.s * (*ipDepthLast)[i] / (ipr.s + 2 * (*ipDepthLast)[i]);
@@ -506,24 +511,27 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
       if (fabs(ipr.v) < 0.5) {
 
 		//ipr2中的各个分量是公式(6)相对于各个分量[r1,r2,r3,t1,t2,t3]的偏导数
+        //ipr2的6个参数分别是误差函数对xyzrpy的偏导数，请务必看准顺序。。。
+
+        //对roll的偏导数
         ipr2.x = v0*(crz*srx*(tx - tz*u1) - crx*(ty*u1 - tx*v1) + srz*srx*(ty - tz*v1)) 
                - u0*(sry*srx*(ty*u1 - tx*v1) + crz*sry*crx*(tx - tz*u1) + sry*srz*crx*(ty - tz*v1)) 
                + cry*srx*(ty*u1 - tx*v1) + cry*crz*crx*(tx - tz*u1) + cry*srz*crx*(ty - tz*v1);
-
+        //对pitch的偏导数
         ipr2.y = u0*((tx - tz*u1)*(srz*sry - crz*srx*cry) - (ty - tz*v1)*(crz*sry + srx*srz*cry) 
                + crx*cry*(ty*u1 - tx*v1)) - (tx - tz*u1)*(srz*cry + crz*srx*sry) 
                + (ty - tz*v1)*(crz*cry - srx*srz*sry) + crx*sry*(ty*u1 - tx*v1);
-
+        //对yaw的偏导数
         ipr2.z = -u0*((tx - tz*u1)*(cry*crz - srx*sry*srz) + (ty - tz*v1)*(cry*srz + srx*sry*crz)) 
                - (tx - tz*u1)*(sry*crz + cry*srx*srz) - (ty - tz*v1)*(sry*srz - cry*srx*crz) 
                - v0*(crx*crz*(ty - tz*v1) - crx*srz*(tx - tz*u1));
-
+        //对tx的偏导数
         ipr2.h = cry*crz*srx - v0*(crx*crz - srx*v1) - u0*(cry*srz + crz*srx*sry + crx*sry*v1) 
                - sry*srz + crx*cry*v1;
-
+        //对ty的偏导数
         ipr2.s = crz*sry - v0*(crx*srz + srx*u1) + u0*(cry*crz + crx*sry*u1 - srx*sry*srz) 
                - crx*cry*u1 + cry*srx*srz;
-
+        //对tz的偏导数
         ipr2.v = u1*(sry*srz - cry*crz*srx) - v1*(crz*sry + cry*srx*srz) + u0*(u1*(cry*srz + crz*srx*sry) 
                - v1*(cry*crz - srx*sry*srz)) + v0*(crx*crz*u1 + crx*srz*v1);
 
@@ -541,6 +549,7 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
 		//R_{(i-1)toi}=R^{-1}=[cry 0 -sry;0 1 0;sry 0 cry]*[1 0 0;0 crx srx;0 -srx crx]*[crz srz 0;-srz crz 0;0 0 1]
 		//R=R_{(i-1)toi}^{-1}
 		//也就是说这里求出来的是R_{(i-1)toi}的逆，后边使用accumulateRotation计算要求即R_{(i-1)toi}
+     //y2是误差函数，大概是两组点在转换到同一坐标系下后，在z=10平面投影的点云的x+y距离f
         double y2 = (ty - tz*v1)*(crz*sry + cry*srx*srz) - (tx - tz*u1)*(sry*srz - cry*crz*srx) 
                   - v0*(srx*(ty*u1 - tx*v1) + crx*crz*(tx - tz*u1) + crx*srz*(ty - tz*v1)) 
                   + u0*((ty - tz*v1)*(cry*crz - srx*sry*srz) - (tx - tz*u1)*(cry*srz + crz*srx*sry) 
@@ -558,8 +567,9 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
           ipr2.s *= scale;
           ipr2.v *= scale;
           y2 *= scale;
-
+          //ipr2分量[r1,r2,r3,t1,t2,t3]的偏导数
           ipRelations2->push_back(ipr2);
+          //R_{(i-1)toi}的逆
           ipy2.push_back(y2);
 
           ptNumNoDepth++;
@@ -691,7 +701,7 @@ void imagePointsHandler(const sensor_msgs::PointCloud2ConstPtr& imagePoints2)
       float deltaT = sqrt(matX.at<float>(3, 0) * 100 * matX.at<float>(3, 0) * 100
                    + matX.at<float>(4, 0) * 100 * matX.at<float>(4, 0) * 100
                    + matX.at<float>(5, 0) * 100 * matX.at<float>(5, 0) * 100);
-
+      //这里的RT是上一帧到本帧的变换
       if (deltaR < 0.00001 && deltaT < 0.00001) {
         break;
       }
